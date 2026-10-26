@@ -1,8 +1,8 @@
 use crate::config::{parse_axis, Config};
 use anyhow::Result;
 use evdev::{
-    uinput::VirtualDevice, uinput::VirtualDeviceBuilder, AbsInfo, Device,
-    EventType, InputEvent,
+    uinput::VirtualDevice, uinput::VirtualDeviceBuilder, AbsInfo, AbsoluteAxisType,
+    AttributeSet, Device, EventType, InputEvent, Key, UinputAbsSetup,
 };
 use std::thread;
 use std::time::Duration;
@@ -10,8 +10,8 @@ use std::time::Duration;
 pub struct CollectiveSimulator {
   gamepad: Device,
   virtual_device: VirtualDevice,
-  target_axis: evdev::AbsoluteAxisType,
-  virtual_axis_type: evdev::AbsoluteAxisType,
+  target_axis: AbsoluteAxisType,
+  virtual_axis_type: AbsoluteAxisType,
   center_val: i32,
   half_span: f32,
   deadzone: f32,
@@ -32,21 +32,47 @@ impl CollectiveSimulator {
     let virtual_axis_type = parse_axis(&config.virtual_axis);
 
     let abs_info = AbsInfo::new(0, 0, 32767, 0, 0, 0);
-    let virtual_device = VirtualDeviceBuilder::new()?
+    let keys = AttributeSet::from_iter([Key::BTN_TRIGGER]);
+
+    let standard_axes = [
+        AbsoluteAxisType::ABS_X,
+        AbsoluteAxisType::ABS_Y,
+        AbsoluteAxisType::ABS_RX,
+        AbsoluteAxisType::ABS_RY,
+        AbsoluteAxisType::ABS_Z,
+        AbsoluteAxisType::ABS_RZ,
+    ];
+
+    let mut builder = VirtualDeviceBuilder::new()?
         .name("DCS-Virtual-Collective")
-        .with_absolute_axis(&abs_info)?
-        .build()?;
+        .with_keys(&keys)?;
 
-    let (center_val, half_span, deadzone) =
-        if let Ok(Some(info)) = gamepad.get_abs_info(target_axis) {
-          let center = (info.minimum() + info.maximum()) / 2;
-          let span = (info.maximum() - info.minimum()) as f32 / 2.0;
-          (center, span, span * config.deadzone_percent)
-        } else {
-          (128, 128.0, 128.0 * config.deadzone_percent)
-        };
+    for axis in standard_axes {
+      let abs_setup = UinputAbsSetup::new(axis, abs_info);
+      builder = builder.with_absolute_axis(&abs_setup)?;
+    }
 
-    let physical_y = center_val;
+    let mut virtual_device = builder.build()?;
+
+    // Initialize virtual axes
+    for axis in standard_axes {
+      let init_val = if axis == AbsoluteAxisType::ABS_X
+          || axis == AbsoluteAxisType::ABS_Y
+          || axis == AbsoluteAxisType::ABS_RX
+          || axis == AbsoluteAxisType::ABS_RY
+      {
+        16384
+      } else {
+        0
+      };
+      let init_event = InputEvent::new(EventType::ABSOLUTE, axis.0, init_val);
+      virtual_device.emit(&[init_event])?;
+    }
+
+    // Logitech F710 / Linux evdev axes are signed: -32768 to 32767 with center at 0
+    let center_val: i32 = 0;
+    let half_span: f32 = 32767.0;
+    let deadzone: f32 = half_span * config.deadzone_percent;
 
     Ok(Self {
       gamepad,
@@ -57,16 +83,17 @@ impl CollectiveSimulator {
       half_span,
       deadzone,
       step_multiplier: config.step_multiplier,
-      physical_y,
+      physical_y: center_val,
       virtual_value: 0.0,
     })
   }
 
   pub fn run(&mut self) -> Result<()> {
-    println!("Rust Virtual Collective active!");
+    println!("Rust Virtual Collective active (Signed Axis Mode)!");
     println!("Press Ctrl+C to stop.");
 
     let max_val = 32767.0f32;
+    let mut last_emitted_value: f32 = -1.0;
 
     loop {
       if let Ok(events) = self.gamepad.fetch_events() {
@@ -80,6 +107,7 @@ impl CollectiveSimulator {
       }
 
       let deviation = self.physical_y - self.center_val;
+      
       if (deviation as f32).abs() > self.deadzone {
         let normalized_dev = ((deviation as f32).abs() - self.deadzone)
             / (self.half_span - self.deadzone);
@@ -92,13 +120,16 @@ impl CollectiveSimulator {
         }
 
         self.virtual_value = self.virtual_value.clamp(0.0, max_val);
+      }
 
+      if (self.virtual_value - last_emitted_value).abs() >= 1.0 {
         let event = InputEvent::new(
             EventType::ABSOLUTE,
             self.virtual_axis_type.0,
             self.virtual_value as i32,
         );
         self.virtual_device.emit(&[event])?;
+        last_emitted_value = self.virtual_value;
       }
 
       thread::sleep(Duration::from_millis(10));

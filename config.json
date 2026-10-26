@@ -1,0 +1,7 @@
+{
+  "gamepad_path": "/dev/input/event3",
+  "target_axis": "ABS_RY",
+  "virtual_axis": "ABS_THROTTLE",
+  "step_multiplier": 350.0,
+  "deadzone_percent": 0.1
+}

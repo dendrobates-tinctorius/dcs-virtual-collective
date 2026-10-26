@@ -17,8 +17,8 @@ impl Default for Config {
   fn default() -> Self {
     Self {
       gamepad_path: "/dev/input/event3".to_string(),
-      target_axis: "ABS_RY".to_string(),
-      virtual_axis: "ABS_THROTTLE".to_string(),
+      target_axis: "ABS_RY".to_string(),   // Physical gamepad right stick Y
+      virtual_axis: "ABS_RY".to_string(),  // Virtual device output axis RY
       step_multiplier: 350.0,
       deadzone_percent: 0.10,
     }
@@ -29,6 +29,13 @@ impl Config {
   pub fn load_or_create(path: &str) -> Result<Self> {
     if Path::new(path).exists() {
       let data = fs::read_to_string(path)?;
+      if data.trim().is_empty() {
+        let default_config = Config::default();
+        let serialized = serde_json::to_string_pretty(&default_config)?;
+        fs::write(path, serialized)?;
+        println!("Configuration file '{}' was empty. Restored defaults.", path);
+        return Ok(default_config);
+      }
       let config: Config = serde_json::from_str(&data)?;
       Ok(config)
     } else {
@@ -54,12 +61,6 @@ pub fn parse_axis(name: &str) -> AbsoluteAxisType {
     "ABS_WHEEL" => AbsoluteAxisType::ABS_WHEEL,
     "ABS_GAS" => AbsoluteAxisType::ABS_GAS,
     "ABS_BRAKE" => AbsoluteAxisType::ABS_BRAKE,
-    _ => {
-      println!(
-          "Warning: Unknown axis '{}' in config, defaulting to ABS_THROTTLE",
-          name
-      );
-      AbsoluteAxisType::ABS_THROTTLE
-    }
+    _ => AbsoluteAxisType::ABS_RY,
   }
 }
