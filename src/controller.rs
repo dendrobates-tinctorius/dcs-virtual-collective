@@ -32,7 +32,21 @@ impl CollectiveSimulator {
     let virtual_axis_type = parse_axis(&config.virtual_axis);
 
     let abs_info = AbsInfo::new(0, 0, 32767, 0, 0, 0);
-    let keys = AttributeSet::from_iter([Key::BTN_TRIGGER]);
+
+    // Register a full standard gamepad button set so Steam Input fully maps the device
+    let keys = AttributeSet::from_iter([
+        Key::BTN_SOUTH,
+        Key::BTN_EAST,
+        Key::BTN_NORTH,
+        Key::BTN_WEST,
+        Key::BTN_TL,
+        Key::BTN_TR,
+        Key::BTN_SELECT,
+        Key::BTN_START,
+        Key::BTN_MODE,
+        Key::BTN_THUMBL,
+        Key::BTN_THUMBR,
+    ]);
 
     let standard_axes = [
         AbsoluteAxisType::ABS_X,
@@ -54,7 +68,7 @@ impl CollectiveSimulator {
 
     let mut virtual_device = builder.build()?;
 
-    // Initialize virtual axes
+    // Initialize all axes to proper defaults
     for axis in standard_axes {
       let init_val = if axis == AbsoluteAxisType::ABS_X
           || axis == AbsoluteAxisType::ABS_Y
@@ -69,7 +83,6 @@ impl CollectiveSimulator {
       virtual_device.emit(&[init_event])?;
     }
 
-    // Logitech F710 / Linux evdev axes are signed: -32768 to 32767 with center at 0
     let center_val: i32 = 0;
     let half_span: f32 = 32767.0;
     let deadzone: f32 = half_span * config.deadzone_percent;
@@ -89,7 +102,7 @@ impl CollectiveSimulator {
   }
 
   pub fn run(&mut self) -> Result<()> {
-    println!("Rust Virtual Collective active (Signed Axis Mode)!");
+    println!("Rust Virtual Collective active (Full Profile Mode)!");
     println!("Press Ctrl+C to stop.");
 
     let max_val = 32767.0f32;
